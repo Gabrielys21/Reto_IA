@@ -1,0 +1,4 @@
+opencv-python
+clarifai
+#Comando para intalar las dependencias desde la consola
+# pip install -r requirements.txt
