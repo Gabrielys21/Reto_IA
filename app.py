@@ -5,22 +5,12 @@ from clarifai_grpc.grpc.api import resources_pb2, service_pb2, service_pb2_grpc
 from clarifai_grpc.grpc.api.status import status_code_pb2
 
 # --- CONFIGURACIÓN DE CLARIFAI ---
-# VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV
-# VVVVVVV REEMPLAZA ESTOS VALORES CUANDO LOS TENGAS DE CLARIFAI VVVVVVV
-CLARIFAI_PAT = "008281726852497ea74c68f4280eaa17"  # Tu Personal Access Token
+CLARIFAI_PAT = "AQUI MERO"  # Tu Personal Access Token
 
-# ID del modelo de Clarifai que usarás.
-# Busca en la comunidad/documentación de Clarifai un modelo público de detección de objetos o caras.
-# Lo más fácil es usar la URL completa del modelo que encuentres en la plataforma Clarifai.
-# Ejemplo (DEBES VERIFICAR Y ENCONTRAR UNO VÁLIDO Y ACTUAL EN CLARIFAI):
-MODEL_URL = "https://clarifai.com/clarifai/main/models/face-detection"
+# MODEL_URL que proporcionaste. El script intentará limpiarla.
+# Asegúrate de que la URL base (antes del '?') apunte a un modelo válido y activo.
+MODEL_URL = "https://clarifai.com/clarifai/main/models/face-detection?inputId=https%3A%2F%2Fs3.amazonaws.com%2Fsamples.clarifai.com%2Ffeatured-models%2Fface-family-with-light-blue-shirts.jpg"
 
-
-# VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV
-
-# Establecer la variable de entorno para el PAT (el SDK lo puede usar así)
-# o lo pasaremos directamente en la llamada.
-# os.environ["CLARIFAI_PAT"] = CLARIFAI_PAT # Puedes descomentar si prefieres setearlo así
 
 def capturar_y_guardar_foto(nombre_archivo="captura_cf.jpg"):
     """Captura una foto desde la webcam y la guarda en un archivo."""
@@ -78,28 +68,36 @@ def analizar_imagen_clarifai(ruta_imagen):
     print(f"Analizando imagen local con Clarifai: {ruta_imagen}")
 
     try:
-        # Verificar que el PAT no sea el valor placeholder
-        if CLARIFAI_PAT == "TU_PAT_DE_CLARIFAI_AQUI":
+        if CLARIFAI_PAT == "TU_PAT_DE_CLARIFAI_AQUI":  # Chequeo por si acaso
             return "Error: El PAT de Clarifai no ha sido configurado en el script."
 
         channel = ClarifaiChannel.get_grpc_channel()
         stub = service_pb2_grpc.V2Stub(channel)
 
-        # Autenticación con PAT
         metadata = (('authorization', f'Key {CLARIFAI_PAT}'),)
 
         with open(ruta_imagen, "rb") as f:
             file_bytes = f.read()
 
-        # Extraer user_id, app_id, model_id de la MODEL_URL
-        # Asume formato como https://clarifai.com/USER_ID/APP_ID/models/MODEL_ID
+        # --- MODIFICACIÓN AQUÍ para limpiar la MODEL_URL ---
         try:
-            parts = MODEL_URL.strip("/").split("/")
-            model_user_id = parts[-4]
-            model_app_id = parts[-3]
-            model_id_from_url = parts[-1]
-        except IndexError:
-            return "Error: El formato de MODEL_URL no es válido. Debe ser como 'https://clarifai.com/USER_ID/APP_ID/models/MODEL_ID'"
+            base_model_url = MODEL_URL.split('?')[0]  # Tomamos la parte antes del '?'
+            parts = base_model_url.strip("/").split("/")
+
+            # Asegurarnos que tenemos suficientes partes después de limpiar la URL
+            if len(parts) < 4:  # Necesitamos al menos scheme, domain, user, app, "models", model_id
+                raise IndexError("URL no tiene suficientes segmentos para extraer user_id, app_id, model_id.")
+
+            model_user_id = parts[-4]  # e.g., 'clarifai'
+            model_app_id = parts[-3]  # e.g., 'main'
+            model_id_from_url = parts[-1]  # e.g., 'face-detection'
+
+            print(f"Usando User ID: {model_user_id}, App ID: {model_app_id}, Model ID: {model_id_from_url}")
+
+        except IndexError as e:
+            print(f"Error procesando MODEL_URL ('{MODEL_URL}'): {e}")
+            return "Error: El formato de MODEL_URL no es válido o no se pudieron extraer los componentes. Debe ser como 'https://clarifai.com/USER_ID/APP_ID/models/MODEL_ID'"
+        # --- FIN DE LA MODIFICACIÓN ---
 
         post_model_outputs_response = stub.PostModelOutputs(
             service_pb2.PostModelOutputsRequest(
@@ -126,19 +124,16 @@ def analizar_imagen_clarifai(ruta_imagen):
         print("\n--- Resultados del Análisis (Clarifai) ---")
         persona_detectada = False
         conceptos_encontrados_cf = []
-        objetos_descritos = []  # Para el opcional
+        objetos_descritos = []
 
         if post_model_outputs_response.outputs:
             for output in post_model_outputs_response.outputs:
-                # Para modelos de detección de objetos/caras, buscamos en 'regions'
                 if output.data and output.data.regions:
                     print(f"Regiones detectadas: {len(output.data.regions)}")
                     for region_idx, region in enumerate(output.data.regions):
                         region_conceptos = []
                         if region.data and region.data.concepts:
                             for concept in region.data.concepts:
-                                # Para un detector de caras, el concepto principal de la región suele ser "face"
-                                # Para un detector de objetos, podría ser "person" u otros.
                                 concepto_str = f"{concept.name} (Confianza: {concept.value:.2f})"
                                 region_conceptos.append(concepto_str)
                                 if "face" in concept.name.lower() or "person" in concept.name.lower():
@@ -146,9 +141,6 @@ def analizar_imagen_clarifai(ruta_imagen):
                         if region_conceptos:
                             objetos_descritos.append(f"Región {region_idx + 1}: {', '.join(region_conceptos)}")
                             conceptos_encontrados_cf.extend(region_conceptos)
-
-
-                # Algunos modelos también pueden devolver conceptos generales para toda la imagen
                 elif output.data and output.data.concepts:
                     print("Conceptos generales detectados:")
                     for concept in output.data.concepts:
@@ -168,7 +160,7 @@ def analizar_imagen_clarifai(ruta_imagen):
         if objetos_descritos:
             resultado_final_str += "Objetos/Conceptos identificados:\n" + "\n".join(
                 [f"  - {desc}" for desc in objetos_descritos])
-        elif conceptos_encontrados_cf:  # Fallback si no hay "objetos_descritos" pero sí conceptos
+        elif conceptos_encontrados_cf:
             resultado_final_str += "Conceptos generales identificados:\n" + "\n".join(
                 [f"  - {desc}" for desc in conceptos_encontrados_cf])
 
@@ -183,33 +175,25 @@ def main():
 
     nombre_foto_cf = "foto_reto_clarifai.jpg"
 
-    if CLARIFAI_PAT == "TU_PAT_DE_CLARIFAI_AQUI" or MODEL_URL == "https://clarifai.com/clarifai/main/models/face-detection" or not MODEL_URL:
+    # Ya no se necesita la condición de ejemplo para MODEL_URL aquí,
+    # porque la URL que tienes ahora es la que estás probando.
+    # El PAT sí es importante que no sea el placeholder.
+    if CLARIFAI_PAT == "TU_PAT_DE_CLARIFAI_AQUI" or not MODEL_URL:
         print("-" * 50)
         print("¡ATENCIÓN! CONFIGURACIÓN REQUERIDA:")
         print("1. Debes configurar tu 'CLARIFAI_PAT' (Personal Access Token) en el script.")
-        print("2. Debes configurar 'MODEL_URL' para que apunte a un modelo válido de Clarifai")
-        print("   (ej. uno de detección de caras o un detector general de objetos).")
-        print(
-            "   El ejemplo actual 'https://clarifai.com/clarifai/main/models/face-detection' podría no estar activo o ser el más adecuado.")
-        print("   Busca en la plataforma Clarifai (Comunidad/Explorar) un modelo público y copia su URL.")
+        print("2. Debes asegurarte que 'MODEL_URL' esté definida y apunte a un modelo válido de Clarifai.")
         print("-" * 50)
         return
 
     ruta_foto_capturada = capturar_y_guardar_foto(nombre_foto_cf)
 
     if ruta_foto_capturada:
-        resultado_analisis = analizar_imagen_clarifai(ruta_foto_capturada)
+        resultado_analisis = analizar_imagen_clarifai(
+            ruta_imagen=ruta_foto_capturada)  # Asegúrate de pasar el argumento correcto
         print("\n========= RESULTADO FINAL (Clarifai) ==========")
         print(resultado_analisis)
         print("==============================================")
-
-        # Opcional: Limpiar la imagen guardada después del análisis
-        # try:
-        #     if os.path.exists(ruta_foto_capturada):
-        #         os.remove(ruta_foto_capturada)
-        #         print(f"Imagen temporal '{ruta_foto_capturada}' eliminada.")
-        # except Exception as e:
-        #     print(f"No se pudo eliminar la imagen temporal: {e}")
     else:
         print("No se tomó ninguna foto, o se canceló la captura.")
 
