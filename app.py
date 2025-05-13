@@ -5,7 +5,7 @@ from clarifai_grpc.grpc.api import resources_pb2, service_pb2, service_pb2_grpc
 from clarifai_grpc.grpc.api.status import status_code_pb2
 
 # --- CONFIGURACIÓN DE CLARIFAI ---
-CLARIFAI_PAT = "AQUI MERO"  # Tu Personal Access Token
+CLARIFAI_PAT = "008281726852497ea74c68f4280eaa17"  # Tu Personal Access Token
 
 # MODEL_URL que proporcionaste. El script intentará limpiarla.
 # Asegúrate de que la URL base (antes del '?') apunte a un modelo válido y activo.
